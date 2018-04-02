@@ -2244,6 +2244,8 @@ EOF
     setup-addon-manifests "addons" "gce-extras"
   fi
 
+  setup-addon-manifests "addons" "networkd"
+
   # Place addon manager pod manifest.
   cp "${src_dir}/kube-addon-manager.yaml" /etc/kubernetes/manifests
 }
