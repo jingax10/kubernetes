@@ -122,7 +122,7 @@ var (
 
 const (
 	useOpenAPIPrintColumnFlagLabel = "use-openapi-print-columns"
-	useServerPrintColumns          = "experimental-server-print"
+	useServerPrintColumns          = "server-print"
 )
 
 // NewGetOptions returns a GetOptions with default chunk size 500.
@@ -202,6 +202,13 @@ func (options *GetOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args 
 	}
 	options.Sort = len(isSorting) > 0
 
+	// TODO (soltysh): currently we don't support sorting and custom columns
+	// with server side print. So in these cases force the old behavior.
+	outputOption := cmd.Flags().Lookup("output").Value.String()
+	if options.Sort && outputOption == "custom-columns" {
+		options.ServerPrint = false
+	}
+
 	options.IncludeUninitialized = cmdutil.ShouldIncludeUninitialized(cmd, false)
 
 	switch {
@@ -211,7 +218,7 @@ func (options *GetOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args 
 		options.IncludeUninitialized = cmdutil.ShouldIncludeUninitialized(cmd, len(args) == 2)
 	default:
 		if len(args) == 0 && cmdutil.IsFilenameSliceEmpty(options.Filenames) {
-			fmt.Fprint(options.ErrOut, "You must specify the type of resource to get. ", cmdutil.ValidResourceTypeList(f))
+			fmt.Fprintf(options.ErrOut, "You must specify the type of resource to get. %s\n\n", cmdutil.ValidResourceTypeList(f))
 			fullCmdName := cmd.Parent().CommandPath()
 			usageString := "Required resource not specified."
 			if len(fullCmdName) > 0 && cmdutil.IsSiblingCommandExists(cmd, "explain") {
@@ -381,6 +388,11 @@ func (options *GetOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []str
 				updatePrintOptionsForOpenAPI(f, mapping, printOpts)
 			}
 
+			if showKind && mapping != nil {
+				printOpts.WithKind = true
+				printOpts.Kind = mapping.GroupVersionKind.GroupKind()
+			}
+
 			printer, err = cmdutil.PrinterForOptions(printOpts)
 			if err != nil {
 				if !errs.Has(err.Error()) {
@@ -402,33 +414,6 @@ func (options *GetOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []str
 
 		typedObj := info.AsInternal()
 
-		if resourcePrinter, found := printer.(*printers.HumanReadablePrinter); found {
-			resourceName := resourcePrinter.GetResourceKind()
-			if mapping != nil {
-				if resourceName == "" {
-					resourceName = mapping.Resource
-				}
-				if alias, ok := kubectl.ResourceShortFormFor(mapping.Resource); ok {
-					resourceName = alias
-				} else if resourceName == "" {
-					resourceName = "none"
-				}
-			} else {
-				resourceName = "none"
-			}
-
-			if showKind {
-				resourcePrinter.EnsurePrintWithKind(resourceName)
-			}
-
-			if err := printer.PrintObj(typedObj, w); err != nil {
-				if !errs.Has(err.Error()) {
-					errs.Insert(err.Error())
-					allErrs = append(allErrs, err)
-				}
-			}
-			continue
-		}
 		objToPrint := typedObj
 		if printer.IsGeneric() {
 			// use raw object as received from the builder when using generic
@@ -727,7 +712,7 @@ func addOpenAPIPrintColumnFlags(cmd *cobra.Command) {
 }
 
 func addServerPrintColumnFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool(useServerPrintColumns, false, "If true, have the server return the appropriate table output. Supports extension APIs and CRD. Experimental.")
+	cmd.Flags().Bool(useServerPrintColumns, true, "If true, have the server return the appropriate table output. Supports extension APIs and CRDs.")
 }
 
 func shouldGetNewPrinterForMapping(printer printers.ResourcePrinter, lastMapping, mapping *meta.RESTMapping) bool {

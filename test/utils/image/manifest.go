@@ -48,7 +48,7 @@ func (i *ImageConfig) SetVersion(version string) {
 }
 
 var (
-	AdmissionWebhook         = ImageConfig{e2eRegistry, "k8s-sample-admission-webhook", "1.9v2", true}
+	AdmissionWebhook         = ImageConfig{e2eRegistry, "k8s-sample-admission-webhook", "1.10v1", true}
 	APIServer                = ImageConfig{e2eRegistry, "k8s-aggregator-sample-apiserver", "1.7v2", true}
 	AppArmorLoader           = ImageConfig{gcRegistry, "apparmor-loader", "0.1", false}
 	BusyBox                  = ImageConfig{gcRegistry, "busybox", "1.24", false}
@@ -57,7 +57,7 @@ var (
 	CudaVectorAdd            = ImageConfig{e2eRegistry, "cuda-vector-add", "1.0", true}
 	Dnsutils                 = ImageConfig{e2eRegistry, "dnsutils", "1.0", true}
 	DNSMasq                  = ImageConfig{gcRegistry, "k8s-dns-dnsmasq", "1.14.5", true}
-	EchoServer               = ImageConfig{gcRegistry, "echoserver", "1.6", false}
+	EchoServer               = ImageConfig{gcRegistry, "echoserver", "1.10", false}
 	EntrypointTester         = ImageConfig{e2eRegistry, "entrypoint-tester", "1.0", true}
 	E2ENet                   = ImageConfig{gcRegistry, "e2e-net", "1.0", true}
 	Fakegitserver            = ImageConfig{e2eRegistry, "fakegitserver", "1.0", true}

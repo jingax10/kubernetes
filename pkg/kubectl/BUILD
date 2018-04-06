@@ -33,7 +33,7 @@ go_test(
         "service_basic_test.go",
         "service_test.go",
         "serviceaccount_test.go",
-        "sorting_printer_test.go",
+        "sorter_test.go",
     ],
     embed = [":go_default_library"],
     deps = [
@@ -48,6 +48,7 @@ go_test(
         "//pkg/client/clientset_generated/internalclientset/typed/batch/internalversion:go_default_library",
         "//pkg/client/clientset_generated/internalclientset/typed/core/internalversion:go_default_library",
         "//pkg/kubectl/util:go_default_library",
+        "//pkg/util/pointer:go_default_library",
         "//vendor/github.com/spf13/cobra:go_default_library",
         "//vendor/k8s.io/api/apps/v1beta1:go_default_library",
         "//vendor/k8s.io/api/autoscaling/v1:go_default_library",
@@ -114,7 +115,7 @@ go_library(
         "service.go",
         "service_basic.go",
         "serviceaccount.go",
-        "sorting_printer.go",
+        "sorter.go",
     ],
     importpath = "k8s.io/kubernetes/pkg/kubectl",
     deps = [

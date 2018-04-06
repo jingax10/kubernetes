@@ -109,6 +109,11 @@ func logResults(allResults []*Results) {
 }
 
 func TestPerformance(t *testing.T) {
+	if testing.Short() {
+		// TODO (#61854) find why flakiness is caused by etcd connectivity before enabling always
+		t.Skip("Skipping because we want to run short tests")
+	}
+
 	apiURL, masterShutdown := util.StartApiserver()
 	defer masterShutdown()
 
@@ -121,9 +126,13 @@ func TestPerformance(t *testing.T) {
 		tests      []*Config
 	)
 
-	for _, numNodes := range []int{10, 100} {
-		for _, alloc := range []ipam.CIDRAllocatorType{ipam.RangeAllocatorType, ipam.CloudAllocatorType, ipam.IPAMFromClusterAllocatorType, ipam.IPAMFromCloudAllocatorType} {
-			tests = append(tests, &Config{AllocatorType: alloc, NumNodes: numNodes, CreateQPS: numNodes, KubeQPS: 10, CloudQPS: 10})
+	if isCustom {
+		tests = append(tests, customConfig)
+	} else {
+		for _, numNodes := range []int{10, 100} {
+			for _, alloc := range []ipam.CIDRAllocatorType{ipam.RangeAllocatorType, ipam.CloudAllocatorType, ipam.IPAMFromClusterAllocatorType, ipam.IPAMFromCloudAllocatorType} {
+				tests = append(tests, &Config{AllocatorType: alloc, NumNodes: numNodes, CreateQPS: numNodes, KubeQPS: 10, CloudQPS: 10})
+			}
 		}
 	}
 
