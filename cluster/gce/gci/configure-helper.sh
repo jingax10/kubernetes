@@ -2310,6 +2310,7 @@ function config-policy-routing {
   if [[ "${NETWORK_POLICY_PROVIDER:-}" != "calico" ]]; then
     sysctl net.ipv4.conf.all.rp_filter=2
   fi
+  sysctl net.ipv4.conf.eth0.accept_local=1
   local -r tables="/etc/iproute2/rt_tables"
   local reserved_tables="$(grep -v ^# ${tables} | awk '{print $1}')"
   local nic0="$(ip route get 8.8.8.8 | sed -n 's/.*dev \([^\ ]*\) .*/\1/p')"
@@ -2328,7 +2329,7 @@ function config-policy-routing {
     echo "${pr_table} ${pr_table_name}" | sudo tee -a "${tables}" > /dev/null
     ip route add default via "${gateway}" table "${pr_table_name}"
     ip rule add not iif "${nic0}" table "${pr_table_name}"
-    ip rule add from "${host_ip}" table main
+    ip rule add iif lo table main
   fi
 }
 
