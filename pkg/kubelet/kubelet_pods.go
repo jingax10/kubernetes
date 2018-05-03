@@ -95,23 +95,6 @@ func (kl *Kubelet) GetActivePods() []*v1.Pod {
 	return activePods
 }
 
-func makeAbsolutePath(goos, path string) string {
-	if goos != "windows" {
-		return "/" + path
-	}
-	// These are all for windows
-	// If there is a colon, give up.
-	if strings.Contains(path, ":") {
-		return path
-	}
-	// If there is a slash, but no drive, add 'c:'
-	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
-		return "c:" + path
-	}
-	// Otherwise, add 'c:\'
-	return "c:\\" + path
-}
-
 // makeBlockVolumes maps the raw block devices specified in the path of the container
 // Experimental
 func (kl *Kubelet) makeBlockVolumes(pod *v1.Pod, container *v1.Container, podVolumes kubecontainer.VolumeMap, blkutil volumepathhandler.BlockVolumePathHandler) ([]kubecontainer.DeviceInfo, error) {
@@ -240,7 +223,7 @@ func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, h
 			}
 		}
 		if !filepath.IsAbs(containerPath) {
-			containerPath = makeAbsolutePath(runtime.GOOS, containerPath)
+			containerPath = volumeutil.MakeAbsolutePath(runtime.GOOS, containerPath)
 		}
 
 		propagation, err := translateMountPropagation(mount.MountPropagation)
@@ -286,12 +269,14 @@ func translateMountPropagation(mountMode *v1.MountPropagationMode) (runtimeapi.M
 	}
 	switch {
 	case mountMode == nil:
-		// HostToContainer is the default
-		return runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER, nil
+		// PRIVATE is the default
+		return runtimeapi.MountPropagation_PROPAGATION_PRIVATE, nil
 	case *mountMode == v1.MountPropagationHostToContainer:
 		return runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER, nil
 	case *mountMode == v1.MountPropagationBidirectional:
 		return runtimeapi.MountPropagation_PROPAGATION_BIDIRECTIONAL, nil
+	case *mountMode == v1.MountPropagationNone:
+		return runtimeapi.MountPropagation_PROPAGATION_PRIVATE, nil
 	default:
 		return 0, fmt.Errorf("invalid MountPropagation mode: %q", mountMode)
 	}
@@ -918,7 +903,11 @@ func (kl *Kubelet) PodResourcesAreReclaimed(pod *v1.Pod, status v1.PodStatus) bo
 		return false
 	}
 	if len(runtimeStatus.ContainerStatuses) > 0 {
-		glog.V(3).Infof("Pod %q is terminated, but some containers have not been cleaned up: %+v", format.Pod(pod), runtimeStatus.ContainerStatuses)
+		var statusStr string
+		for _, status := range runtimeStatus.ContainerStatuses {
+			statusStr += fmt.Sprintf("%+v ", *status)
+		}
+		glog.V(3).Infof("Pod %q is terminated, but some containers have not been cleaned up: %s", format.Pod(pod), statusStr)
 		return false
 	}
 	if kl.podVolumesExist(pod.UID) && !kl.keepTerminatedPodVolumes {

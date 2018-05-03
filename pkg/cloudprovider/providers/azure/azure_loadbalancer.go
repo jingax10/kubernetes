@@ -199,7 +199,8 @@ func (az *Cloud) getServiceLoadBalancer(service *v1.Service, clusterName string,
 
 	// check if the service already has a load balancer
 	if existingLBs != nil {
-		for _, existingLB := range existingLBs {
+		for i := range existingLBs {
+			existingLB := existingLBs[i]
 			if strings.EqualFold(*existingLB.Name, defaultLBName) {
 				defaultLB = &existingLB
 			}
@@ -437,7 +438,7 @@ func (az *Cloud) ensurePublicIPExists(service *v1.Service, pipName string, domai
 			DomainNameLabel: &domainNameLabel,
 		}
 	}
-	pip.Tags = &map[string]*string{"service": &serviceName}
+	pip.Tags = map[string]*string{"service": &serviceName}
 	if az.useStandardLoadBalancer() {
 		pip.Sku = &network.PublicIPAddressSku{
 			Name: network.PublicIPAddressSkuNameStandard,
@@ -780,7 +781,7 @@ func (az *Cloud) reconcileLoadBalancer(clusterName string, service *v1.Service, 
 			// Remove backend pools from vmSets. This is required for virtual machine scale sets before removing the LB.
 			vmSetName := az.mapLoadBalancerNameToVMSet(lbName, clusterName)
 			glog.V(10).Infof("EnsureBackendPoolDeleted(%s, %s): start", lbBackendPoolID, vmSetName)
-			err := az.vmSet.EnsureBackendPoolDeleted(lbBackendPoolID, vmSetName)
+			err := az.vmSet.EnsureBackendPoolDeleted(lbBackendPoolID, vmSetName, lb.BackendAddressPools)
 			if err != nil {
 				glog.Errorf("EnsureBackendPoolDeleted(%s, %s) failed: %v", lbBackendPoolID, vmSetName, err)
 				return nil, err
@@ -1201,8 +1202,8 @@ func (az *Cloud) reconcilePublicIP(clusterName string, service *v1.Service, want
 
 	for _, pip := range pips {
 		if pip.Tags != nil &&
-			(*pip.Tags)["service"] != nil &&
-			*(*pip.Tags)["service"] == serviceName {
+			(pip.Tags)["service"] != nil &&
+			*(pip.Tags)["service"] == serviceName {
 			// We need to process for pips belong to this service
 			pipName := *pip.Name
 			if wantLb && !isInternal && pipName == desiredPipName {

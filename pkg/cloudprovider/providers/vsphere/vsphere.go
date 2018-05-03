@@ -577,11 +577,6 @@ func convertToK8sType(vmName string) k8stypes.NodeName {
 	return k8stypes.NodeName(vmName)
 }
 
-// ExternalID returns the cloud provider ID of the node with the specified Name (deprecated).
-func (vs *VSphere) ExternalID(ctx context.Context, nodeName k8stypes.NodeName) (string, error) {
-	return vs.InstanceID(ctx, nodeName)
-}
-
 // InstanceExistsByProviderID returns true if the instance with the given provider id still exists and is running.
 // If false is returned with no error, the instance will be immediately deleted by the cloud controller manager.
 func (vs *VSphere) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
@@ -592,7 +587,8 @@ func (vs *VSphere) InstanceExistsByProviderID(ctx context.Context, providerID st
 		return false, err
 	}
 	for _, node := range nodes {
-		if node.VMUUID == GetUUIDFromProviderID(providerID) {
+		// ProviderID is UUID for nodes v1.9.3+
+		if node.VMUUID == GetUUIDFromProviderID(providerID) || node.NodeName == providerID {
 			nodeName = node.NodeName
 			break
 		}
@@ -607,6 +603,11 @@ func (vs *VSphere) InstanceExistsByProviderID(ctx context.Context, providerID st
 	}
 
 	return false, err
+}
+
+// InstanceShutdownByProviderID returns true if the instance is in safe state to detach volumes
+func (vs *VSphere) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
+	return false, cloudprovider.NotImplemented
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified Name.
@@ -780,6 +781,11 @@ func (vs *VSphere) DetachDisk(volPath string, nodeName k8stypes.NodeName) error 
 		defer cancel()
 		vsi, err := vs.getVSphereInstance(nodeName)
 		if err != nil {
+			// If node doesn't exist, disk is already detached from node.
+			if err == vclib.ErrNoVMFound {
+				glog.Infof("Node %q does not exist, disk %s is already detached from node.", convertToString(nodeName), volPath)
+				return nil
+			}
 			return err
 		}
 		// Ensure client is logged in and session is valid

@@ -285,7 +285,7 @@ function kube::release::create_docker_images_for_server() {
     mkdir -p "${images_dir}"
 
     local -r docker_registry="k8s.gcr.io"
-    # TODO(thockin): Remove all traces of this after 1.10 release.
+    # TODO(thockin): Remove all traces of this after 1.11 release.
     # The following is the old non-indirected registry name.  To ease the
     # transition to the new name (above), we are double-tagging saved images.
     local -r deprecated_registry="gcr.io/google_containers"
@@ -389,6 +389,7 @@ function kube::release::package_kube_manifests_tarball() {
   cp "${src_dir}/glbc.manifest" "${dst_dir}"
   cp "${src_dir}/rescheduler.manifest" "${dst_dir}/"
   cp "${src_dir}/e2e-image-puller.manifest" "${dst_dir}/"
+  cp "${src_dir}/etcd-empty-dir-cleanup.yaml" "${dst_dir}/"
   cp "${KUBE_ROOT}/cluster/gce/gci/configure-helper.sh" "${dst_dir}/gci-configure-helper.sh"
   cp "${KUBE_ROOT}/cluster/gce/gci/health-monitor.sh" "${dst_dir}/health-monitor.sh"
   local objects
@@ -481,7 +482,6 @@ EOF
   mkdir -p "${release_stage}/hack"
   cp -R "${KUBE_ROOT}/hack/lib" "${release_stage}/hack/"
 
-  cp -R "${KUBE_ROOT}/examples" "${release_stage}/"
   cp -R "${KUBE_ROOT}/docs" "${release_stage}/"
   cp "${KUBE_ROOT}/README.md" "${release_stage}/"
   cp "${KUBE_ROOT}/Godeps/LICENSES" "${release_stage}/"

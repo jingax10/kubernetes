@@ -5,6 +5,7 @@ aliases:
     - k82cn
     - timothysc
     - wojtek-t
+    - aveshagarwal
   sig-scheduling:
     - bsalamat
     - davidopp
@@ -38,6 +39,7 @@ aliases:
     - eparis
     - ericchiang
     - ghodss
+    - juanvallejo
     - mengqiy
     - rootfs
     - shiywang
@@ -91,6 +93,7 @@ aliases:
     - mrhohn
     - nicksardo
     - thockin
+    - rramkumar1
   sig-apps-reviewers:
     - enisoc
     - erictune

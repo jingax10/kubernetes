@@ -38,7 +38,7 @@ import (
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 	// TODO: remove this import if
-	// api.Registry.GroupOrDie(v1.GroupName).GroupVersion.String() is changed
+	// api.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String() is changed
 	// to "v1"?
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
@@ -51,56 +51,11 @@ import (
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 )
 
-func TestMakeAbsolutePath(t *testing.T) {
-	tests := []struct {
-		goos         string
-		path         string
-		expectedPath string
-		name         string
-	}{
-		{
-			goos:         "linux",
-			path:         "non-absolute/path",
-			expectedPath: "/non-absolute/path",
-			name:         "basic linux",
-		},
-		{
-			goos:         "windows",
-			path:         "some\\path",
-			expectedPath: "c:\\some\\path",
-			name:         "basic windows",
-		},
-		{
-			goos:         "windows",
-			path:         "/some/path",
-			expectedPath: "c:/some/path",
-			name:         "linux path on windows",
-		},
-		{
-			goos:         "windows",
-			path:         "\\some\\path",
-			expectedPath: "c:\\some\\path",
-			name:         "windows path no drive",
-		},
-		{
-			goos:         "windows",
-			path:         "\\:\\some\\path",
-			expectedPath: "\\:\\some\\path",
-			name:         "windows path with colon",
-		},
-	}
-	for _, test := range tests {
-		path := makeAbsolutePath(test.goos, test.path)
-		if path != test.expectedPath {
-			t.Errorf("[%s] Expected %s saw %s", test.name, test.expectedPath, path)
-		}
-	}
-}
-
 func TestMakeMounts(t *testing.T) {
 	bTrue := true
 	propagationHostToContainer := v1.MountPropagationHostToContainer
 	propagationBidirectional := v1.MountPropagationBidirectional
+	propagationNone := v1.MountPropagationNone
 
 	testCases := map[string]struct {
 		container      v1.Container
@@ -125,9 +80,10 @@ func TestMakeMounts(t *testing.T) {
 						MountPropagation: &propagationHostToContainer,
 					},
 					{
-						MountPath: "/mnt/path3",
-						Name:      "disk",
-						ReadOnly:  true,
+						MountPath:        "/mnt/path3",
+						Name:             "disk",
+						ReadOnly:         true,
+						MountPropagation: &propagationNone,
 					},
 					{
 						MountPath: "/mnt/path4",
@@ -156,7 +112,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/disk",
 					ReadOnly:       true,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 				{
 					Name:           "disk4",
@@ -164,7 +120,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/host",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 				{
 					Name:           "disk5",
@@ -172,7 +128,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/var/lib/kubelet/podID/volumes/empty/disk5",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 			},
 			expectErr: false,
@@ -231,7 +187,7 @@ func TestMakeMounts(t *testing.T) {
 					HostPath:       "/mnt/host",
 					ReadOnly:       false,
 					SELinuxRelabel: false,
-					Propagation:    runtimeapi.MountPropagation_PROPAGATION_HOST_TO_CONTAINER,
+					Propagation:    runtimeapi.MountPropagation_PROPAGATION_PRIVATE,
 				},
 			},
 			expectErr: false,
@@ -1041,7 +997,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "metadata.name",
 							},
 						},
@@ -1050,7 +1006,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAMESPACE",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "metadata.namespace",
 							},
 						},
@@ -1059,7 +1015,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NODE_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "spec.nodeName",
 							},
 						},
@@ -1068,7 +1024,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_SERVICE_ACCOUNT_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "spec.serviceAccountName",
 							},
 						},
@@ -1077,7 +1033,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_IP",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "status.podIP",
 							},
 						},
@@ -1086,7 +1042,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "HOST_IP",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "status.hostIP",
 							},
 						},
@@ -1117,7 +1073,7 @@ func TestMakeEnvironmentVariables(t *testing.T) {
 						Name: "POD_NAME",
 						ValueFrom: &v1.EnvVarSource{
 							FieldRef: &v1.ObjectFieldSelector{
-								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersion.String(),
+								APIVersion: legacyscheme.Registry.GroupOrDie(v1.GroupName).GroupVersions[0].String(),
 								FieldPath:  "metadata.name",
 							},
 						},

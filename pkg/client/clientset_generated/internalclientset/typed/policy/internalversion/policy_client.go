@@ -27,6 +27,7 @@ type PolicyInterface interface {
 	RESTClient() rest.Interface
 	EvictionsGetter
 	PodDisruptionBudgetsGetter
+	PodSecurityPoliciesGetter
 }
 
 // PolicyClient is used to interact with features provided by the policy group.
@@ -40,6 +41,10 @@ func (c *PolicyClient) Evictions(namespace string) EvictionInterface {
 
 func (c *PolicyClient) PodDisruptionBudgets(namespace string) PodDisruptionBudgetInterface {
 	return newPodDisruptionBudgets(c, namespace)
+}
+
+func (c *PolicyClient) PodSecurityPolicies() PodSecurityPolicyInterface {
+	return newPodSecurityPolicies(c)
 }
 
 // NewForConfig creates a new PolicyClient for the given config.
@@ -80,8 +85,8 @@ func setConfigDefaults(config *rest.Config) error {
 	if config.UserAgent == "" {
 		config.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
-	if config.GroupVersion == nil || config.GroupVersion.Group != g.GroupVersion.Group {
-		gv := g.GroupVersion
+	if config.GroupVersion == nil || config.GroupVersion.Group != g.GroupVersions[0].Group {
+		gv := g.GroupVersions[0]
 		config.GroupVersion = &gv
 	}
 	config.NegotiatedSerializer = scheme.Codecs

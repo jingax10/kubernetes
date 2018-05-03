@@ -45,6 +45,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/timer"
 	testutils "k8s.io/kubernetes/test/utils"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -225,8 +226,10 @@ func density30AddonResourceVerifier(numNodes int) map[string]framework.ResourceC
 
 func logPodStartupStatus(c clientset.Interface, expectedPods int, observedLabels map[string]string, period time.Duration, stopCh chan struct{}) {
 	label := labels.SelectorFromSet(labels.Set(observedLabels))
-	podStore := testutils.NewPodStore(c, metav1.NamespaceAll, label, fields.Everything())
+	podStore, err := testutils.NewPodStore(c, metav1.NamespaceAll, label, fields.Everything())
+	framework.ExpectNoError(err)
 	defer podStore.Stop()
+
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
 	for {
@@ -586,7 +589,7 @@ var _ = SIGDescribe("Density", func() {
 					Client:               clients[i],
 					InternalClient:       internalClients[i],
 					ScalesGetter:         scalesClients[i],
-					Image:                framework.GetPauseImageName(f.ClientSet),
+					Image:                imageutils.GetPauseImageName(),
 					Name:                 name,
 					Namespace:            nsName,
 					Labels:               map[string]string{"type": "densityPod"},
@@ -744,7 +747,7 @@ var _ = SIGDescribe("Density", func() {
 					name := additionalPodsPrefix + "-" + strconv.Itoa(i)
 					nsName := namespaces[i%len(namespaces)].Name
 					rcNameToNsMap[name] = nsName
-					go createRunningPodFromRC(&wg, c, name, nsName, framework.GetPauseImageName(f.ClientSet), additionalPodsPrefix, cpuRequest, memRequest)
+					go createRunningPodFromRC(&wg, c, name, nsName, imageutils.GetPauseImageName(), additionalPodsPrefix, cpuRequest, memRequest)
 					time.Sleep(200 * time.Millisecond)
 				}
 				wg.Wait()

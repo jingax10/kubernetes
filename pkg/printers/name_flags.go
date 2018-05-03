@@ -17,6 +17,7 @@ limitations under the License.
 package printers
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,14 +32,15 @@ import (
 // a resource's fully-qualified Kind.group/name, or a successful
 // message about that resource if an Operation is provided.
 type NamePrintFlags struct {
-	// DryRun indicates whether the "(dry run)" message
-	// should be appended to the finalized "successful"
-	// message printed about an action on an object.
-	DryRun bool
 	// Operation describes the name of the action that
 	// took place on an object, to be included in the
 	// finalized "successful" message.
 	Operation string
+}
+
+func (f *NamePrintFlags) Complete(successTemplate string) error {
+	f.Operation = fmt.Sprintf(successTemplate, f.Operation)
+	return nil
 }
 
 // ToPrinter receives an outputFormat and returns a printer capable of
@@ -53,10 +55,6 @@ func (f *NamePrintFlags) ToPrinter(outputFormat string) (ResourcePrinter, error)
 		Decoders:  decoders,
 	}
 
-	if f.DryRun {
-		namePrinter.Operation = namePrinter.Operation + " (dry run)"
-	}
-
 	outputFormat = strings.ToLower(outputFormat)
 	switch outputFormat {
 	case "name":
@@ -65,7 +63,7 @@ func (f *NamePrintFlags) ToPrinter(outputFormat string) (ResourcePrinter, error)
 	case "":
 		return namePrinter, nil
 	default:
-		return nil, NoCompatiblePrinterError{f}
+		return nil, NoCompatiblePrinterError{Options: f, OutputFormat: &outputFormat}
 	}
 }
 
@@ -75,9 +73,8 @@ func (f *NamePrintFlags) AddFlags(c *cobra.Command) {}
 
 // NewNamePrintFlags returns flags associated with
 // --name printing, with default values set.
-func NewNamePrintFlags(operation string, dryRun bool) *NamePrintFlags {
+func NewNamePrintFlags(operation string) *NamePrintFlags {
 	return &NamePrintFlags{
 		Operation: operation,
-		DryRun:    dryRun,
 	}
 }

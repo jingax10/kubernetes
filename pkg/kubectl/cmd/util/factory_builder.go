@@ -47,7 +47,7 @@ func NewBuilderFactory(clientAccessFactory ClientAccessFactory, objectMappingFac
 // NewBuilder returns a new resource builder for structured api objects.
 func (f *ring2Factory) NewBuilder() *resource.Builder {
 	clientMapperFunc := resource.ClientMapperFunc(f.objectMappingFactory.ClientForMapping)
-	mapper, typer := f.objectMappingFactory.Object()
+	mapper, mapperErr := f.objectMappingFactory.RESTMapper()
 
 	unstructuredClientMapperFunc := resource.ClientMapperFunc(f.objectMappingFactory.UnstructuredClientForMapping)
 
@@ -56,18 +56,16 @@ func (f *ring2Factory) NewBuilder() *resource.Builder {
 	return resource.NewBuilder(
 		&resource.Mapper{
 			RESTMapper:   mapper,
-			ObjectTyper:  typer,
 			ClientMapper: clientMapperFunc,
 			Decoder:      InternalVersionDecoder(),
 		},
 		&resource.Mapper{
 			RESTMapper:   mapper,
-			ObjectTyper:  typer,
 			ClientMapper: unstructuredClientMapperFunc,
 			Decoder:      unstructured.UnstructuredJSONScheme,
 		},
 		categoryExpander,
-	)
+	).AddError(mapperErr)
 }
 
 // PluginLoader loads plugins from a path set by the KUBECTL_PLUGINS_PATH env var.
@@ -99,23 +97,21 @@ func (f *ring2Factory) ScaleClient() (scaleclient.ScalesGetter, error) {
 		return nil, err
 	}
 	resolver := scaleclient.NewDiscoveryScaleKindResolver(discoClient)
-	mapper, _ := f.objectMappingFactory.Object()
-	return scaleclient.New(restClient, mapper, dynamic.LegacyAPIPathResolverFunc, resolver), nil
-}
-
-func (f *ring2Factory) Scaler(mapping *meta.RESTMapping) (kubectl.Scaler, error) {
-	clientset, err := f.clientAccessFactory.ClientSet()
+	mapper, err := f.objectMappingFactory.RESTMapper()
 	if err != nil {
 		return nil, err
 	}
 
+	return scaleclient.New(restClient, mapper, dynamic.LegacyAPIPathResolverFunc, resolver), nil
+}
+
+func (f *ring2Factory) Scaler() (kubectl.Scaler, error) {
 	scalesGetter, err := f.ScaleClient()
 	if err != nil {
 		return nil, err
 	}
-	gvk := mapping.GroupVersionKind.GroupVersion().WithResource(mapping.Resource)
 
-	return kubectl.ScalerFor(mapping.GroupVersionKind.GroupKind(), clientset.Batch(), scalesGetter, gvk.GroupResource()), nil
+	return kubectl.NewScaler(scalesGetter), nil
 }
 
 func (f *ring2Factory) Reaper(mapping *meta.RESTMapping) (kubectl.Reaper, error) {

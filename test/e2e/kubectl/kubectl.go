@@ -199,7 +199,7 @@ var _ = SIGDescribe("Kubectl alpha client", func() {
 		})
 
 		It("should create a CronJob", func() {
-			framework.SkipIfMissingResource(f.ClientPool, CronJobGroupVersionResourceAlpha, f.Namespace.Name)
+			framework.SkipIfMissingResource(f.DynamicClient, CronJobGroupVersionResourceAlpha, f.Namespace.Name)
 
 			schedule := "*/5 * * * ?"
 			framework.RunKubectlOrDie("run", cjName, "--restart=OnFailure", "--generator=cronjob/v2alpha1",
@@ -505,8 +505,6 @@ var _ = SIGDescribe("Kubectl client", func() {
 		})
 
 		It("should support inline execution and attach", func() {
-			framework.SkipIfContainerRuntimeIs("rkt") // #23335
-
 			nsFlag := fmt.Sprintf("--namespace=%v", ns)
 
 			By("executing a command with run and attach with stdin")
@@ -1416,7 +1414,7 @@ metadata:
 		})
 
 		It("should create a CronJob", func() {
-			framework.SkipIfMissingResource(f.ClientPool, CronJobGroupVersionResourceBeta, f.Namespace.Name)
+			framework.SkipIfMissingResource(f.DynamicClient, CronJobGroupVersionResourceBeta, f.Namespace.Name)
 
 			schedule := "*/5 * * * ?"
 			framework.RunKubectlOrDie("run", cjName, "--restart=OnFailure", "--generator=cronjob/v1beta1",
@@ -1536,9 +1534,6 @@ metadata:
 		*/
 		framework.ConformanceIt("should create a job from an image, then delete the job ", func() {
 			nsFlag := fmt.Sprintf("--namespace=%v", ns)
-
-			// The rkt runtime doesn't support attach, see #23335
-			framework.SkipIfContainerRuntimeIs("rkt")
 
 			By("executing a command with run --rm and attach with stdin")
 			t := time.NewTimer(runJobTimeout)

@@ -23,14 +23,24 @@ import (
 )
 
 type NoCompatiblePrinterError struct {
-	options interface{}
+	OutputFormat *string
+	Options      interface{}
 }
 
 func (e NoCompatiblePrinterError) Error() string {
-	return fmt.Sprintf("unable to match a printer suitable for the options specified: %#v", e.options)
+	output := ""
+	if e.OutputFormat != nil {
+		output = *e.OutputFormat
+	}
+
+	return fmt.Sprintf("unable to match a printer suitable for the output format %q and the options specified: %#v", output, e.Options)
 }
 
 func IsNoCompatiblePrinterError(err error) bool {
+	if err == nil {
+		return false
+	}
+
 	_, ok := err.(NoCompatiblePrinterError)
 	return ok
 }
@@ -45,9 +55,8 @@ type PrintFlags struct {
 	OutputFormat *string
 }
 
-func (f *PrintFlags) Complete(dryRun bool) error {
-	f.NamePrintFlags.DryRun = dryRun
-	return nil
+func (f *PrintFlags) Complete(successTemplate string) error {
+	return f.NamePrintFlags.Complete(successTemplate)
 }
 
 func (f *PrintFlags) ToPrinter() (ResourcePrinter, error) {
@@ -56,12 +65,15 @@ func (f *PrintFlags) ToPrinter() (ResourcePrinter, error) {
 		outputFormat = *f.OutputFormat
 	}
 
-	p, err := f.JSONYamlPrintFlags.ToPrinter(outputFormat)
-	if err == nil {
-		return p, nil
+	if p, err := f.JSONYamlPrintFlags.ToPrinter(outputFormat); !IsNoCompatiblePrinterError(err) {
+		return p, err
 	}
 
-	return f.NamePrintFlags.ToPrinter(outputFormat)
+	if p, err := f.NamePrintFlags.ToPrinter(outputFormat); !IsNoCompatiblePrinterError(err) {
+		return p, err
+	}
+
+	return nil, NoCompatiblePrinterError{Options: f, OutputFormat: f.OutputFormat}
 }
 
 func (f *PrintFlags) AddFlags(cmd *cobra.Command) {
@@ -73,6 +85,20 @@ func (f *PrintFlags) AddFlags(cmd *cobra.Command) {
 	}
 }
 
+// WithDefaultOutput sets a default output format if one is not provided through a flag value
+func (f *PrintFlags) WithDefaultOutput(output string) *PrintFlags {
+	existingFormat := ""
+	if f.OutputFormat != nil {
+		existingFormat = *f.OutputFormat
+	}
+	if len(existingFormat) == 0 {
+		existingFormat = output
+	}
+	f.OutputFormat = &existingFormat
+
+	return f
+}
+
 func NewPrintFlags(operation string) *PrintFlags {
 	outputFormat := ""
 
@@ -80,6 +106,6 @@ func NewPrintFlags(operation string) *PrintFlags {
 		OutputFormat: &outputFormat,
 
 		JSONYamlPrintFlags: NewJSONYamlPrintFlags(),
-		NamePrintFlags:     NewNamePrintFlags(operation, false),
+		NamePrintFlags:     NewNamePrintFlags(operation),
 	}
 }

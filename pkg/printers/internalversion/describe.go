@@ -33,6 +33,7 @@ import (
 	"github.com/golang/glog"
 
 	"github.com/fatih/camelcase"
+
 	versionedextension "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -45,7 +46,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
-	clientextensionsv1beta1 "k8s.io/client-go/kubernetes/typed/extensions/v1beta1"
+	externalclient "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/pkg/api/events"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/api/ref"
@@ -122,7 +124,16 @@ func (pw *prefixWriter) Flush() {
 	}
 }
 
-func describerMap(c clientset.Interface) map[schema.GroupKind]printers.Describer {
+func describerMap(clientConfig *rest.Config) (map[schema.GroupKind]printers.Describer, error) {
+	c, err := clientset.NewForConfig(clientConfig)
+	if err != nil {
+		return nil, err
+	}
+	externalclient, err := externalclient.NewForConfig(clientConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	m := map[schema.GroupKind]printers.Describer{
 		api.Kind("Pod"):                   &PodDescriber{c},
 		api.Kind("ReplicationController"): &ReplicationControllerDescriber{c},
@@ -144,12 +155,12 @@ func describerMap(c clientset.Interface) map[schema.GroupKind]printers.Describer
 		extensions.Kind("PodSecurityPolicy"):           &PodSecurityPolicyDescriber{c},
 		autoscaling.Kind("HorizontalPodAutoscaler"):    &HorizontalPodAutoscalerDescriber{c},
 		extensions.Kind("DaemonSet"):                   &DaemonSetDescriber{c},
-		extensions.Kind("Deployment"):                  &DeploymentDescriber{c, versionedExtensionsClientV1beta1(c)},
+		extensions.Kind("Deployment"):                  &DeploymentDescriber{c, externalclient},
 		extensions.Kind("Ingress"):                     &IngressDescriber{c},
 		batch.Kind("Job"):                              &JobDescriber{c},
-		batch.Kind("CronJob"):                          &CronJobDescriber{c},
+		batch.Kind("CronJob"):                          &CronJobDescriber{c, externalclient},
 		apps.Kind("StatefulSet"):                       &StatefulSetDescriber{c},
-		apps.Kind("Deployment"):                        &DeploymentDescriber{c, versionedExtensionsClientV1beta1(c)},
+		apps.Kind("Deployment"):                        &DeploymentDescriber{c, externalclient},
 		apps.Kind("DaemonSet"):                         &DaemonSetDescriber{c},
 		apps.Kind("ReplicaSet"):                        &ReplicaSetDescriber{c},
 		certificates.Kind("CertificateSigningRequest"): &CertificateSigningRequestDescriber{c},
@@ -163,24 +174,19 @@ func describerMap(c clientset.Interface) map[schema.GroupKind]printers.Describer
 		scheduling.Kind("PriorityClass"):               &PriorityClassDescriber{c},
 	}
 
-	return m
-}
-
-// DescribableResources lists all resource types we can describe.
-func DescribableResources() []string {
-	keys := make([]string, 0)
-
-	for k := range describerMap(nil) {
-		resource := strings.ToLower(k.Kind)
-		keys = append(keys, resource)
-	}
-	return keys
+	return m, nil
 }
 
 // DescriberFor returns the default describe functions for each of the standard
 // Kubernetes types.
-func DescriberFor(kind schema.GroupKind, c clientset.Interface) (printers.Describer, bool) {
-	f, ok := describerMap(c)[kind]
+func DescriberFor(kind schema.GroupKind, clientConfig *rest.Config) (printers.Describer, bool) {
+	describers, err := describerMap(clientConfig)
+	if err != nil {
+		glog.V(1).Info(err)
+		return nil, false
+	}
+
+	f, ok := describers[kind]
 	return f, ok
 }
 
@@ -198,7 +204,7 @@ type genericDescriber struct {
 
 func (g *genericDescriber) Describe(namespace, name string, describerSettings printers.DescriberSettings) (output string, err error) {
 	apiResource := &metav1.APIResource{
-		Name:       g.mapping.Resource,
+		Name:       g.mapping.Resource.Resource,
 		Namespaced: g.mapping.Scope.Name() == meta.RESTScopeNameNamespace,
 		Kind:       g.mapping.GroupVersionKind.Kind,
 	}
@@ -1854,10 +1860,11 @@ func describeJob(job *batch.Job, events *api.EventList) (string, error) {
 // CronJobDescriber generates information about a cron job and the jobs it has created.
 type CronJobDescriber struct {
 	clientset.Interface
+	external externalclient.Interface
 }
 
 func (d *CronJobDescriber) Describe(namespace, name string, describerSettings printers.DescriberSettings) (string, error) {
-	cronJob, err := d.Batch().CronJobs(namespace).Get(name, metav1.GetOptions{})
+	cronJob, err := d.external.BatchV1beta1().CronJobs(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -1867,7 +1874,12 @@ func (d *CronJobDescriber) Describe(namespace, name string, describerSettings pr
 		events, _ = d.Core().Events(namespace).Search(legacyscheme.Scheme, cronJob)
 	}
 
-	return describeCronJob(cronJob, events)
+	internalCronJob := &batch.CronJob{}
+	if err := legacyscheme.Scheme.Convert(cronJob, internalCronJob, nil); err != nil {
+		return "", err
+	}
+
+	return describeCronJob(internalCronJob, events)
 }
 
 func describeCronJob(cronJob *batch.CronJob, events *api.EventList) (string, error) {
@@ -2703,9 +2715,6 @@ func describeNode(node *api.Node, nodeNonTerminatedPodsList *api.PodList, events
 		if len(node.Spec.PodCIDR) > 0 {
 			w.Write(LEVEL_0, "PodCIDR:\t%s\n", node.Spec.PodCIDR)
 		}
-		if len(node.Spec.ExternalID) > 0 {
-			w.Write(LEVEL_0, "ExternalID:\t%s\n", node.Spec.ExternalID)
-		}
 		if len(node.Spec.ProviderID) > 0 {
 			w.Write(LEVEL_0, "ProviderID:\t%s\n", node.Spec.ProviderID)
 		}
@@ -3066,11 +3075,11 @@ func DescribeEvents(el *api.EventList, w PrefixWriter) {
 // DeploymentDescriber generates information about a deployment.
 type DeploymentDescriber struct {
 	clientset.Interface
-	extensionV1beta1Client clientextensionsv1beta1.ExtensionsV1beta1Interface
+	external externalclient.Interface
 }
 
 func (dd *DeploymentDescriber) Describe(namespace, name string, describerSettings printers.DescriberSettings) (string, error) {
-	d, err := dd.extensionV1beta1Client.Deployments(namespace).Get(name, metav1.GetOptions{})
+	d, err := dd.external.ExtensionsV1beta1().Deployments(namespace).Get(name, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -3115,7 +3124,7 @@ func describeDeployment(d *versionedextension.Deployment, selector labels.Select
 				w.Write(LEVEL_1, "%v \t%v\t%v\n", c.Type, c.Status, c.Reason)
 			}
 		}
-		oldRSs, _, newRS, err := deploymentutil.GetAllReplicaSets(d, dd.extensionV1beta1Client)
+		oldRSs, _, newRS, err := deploymentutil.GetAllReplicaSets(d, dd.external.ExtensionsV1beta1())
 		if err == nil {
 			w.Write(LEVEL_0, "OldReplicaSets:\t%s\n", printReplicaSetsByLabels(oldRSs))
 			var newRSs []*versionedextension.ReplicaSet
@@ -3277,15 +3286,18 @@ func printNetworkPolicySpecIngressFrom(npirs []networking.NetworkPolicyIngressRu
 			w.Write(LEVEL_0, "%s%s\n", initialIndent, "From: <any> (traffic not restricted by source)")
 		} else {
 			for _, from := range npir.From {
-				w.Write(LEVEL_0, "%s", initialIndent)
-				if from.PodSelector != nil {
-					w.Write(LEVEL_0, "%s: %s\n", "From PodSelector", metav1.FormatLabelSelector(from.PodSelector))
+				w.Write(LEVEL_0, "%s%s\n", initialIndent, "From:")
+				if from.PodSelector != nil && from.NamespaceSelector != nil {
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "NamespaceSelector", metav1.FormatLabelSelector(from.NamespaceSelector))
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "PodSelector", metav1.FormatLabelSelector(from.PodSelector))
+				} else if from.PodSelector != nil {
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "PodSelector", metav1.FormatLabelSelector(from.PodSelector))
 				} else if from.NamespaceSelector != nil {
-					w.Write(LEVEL_0, "%s: %s\n", "From NamespaceSelector", metav1.FormatLabelSelector(from.NamespaceSelector))
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "NamespaceSelector", metav1.FormatLabelSelector(from.NamespaceSelector))
 				} else if from.IPBlock != nil {
-					w.Write(LEVEL_0, "From IPBlock:\n")
-					w.Write(LEVEL_0, "%s%sCIDR: %s\n", initialIndent, initialIndent, from.IPBlock.CIDR)
-					w.Write(LEVEL_0, "%s%sExcept: %v\n", initialIndent, initialIndent, strings.Join(from.IPBlock.Except, ", "))
+					w.Write(LEVEL_1, "%sIPBlock:\n", initialIndent)
+					w.Write(LEVEL_2, "%sCIDR: %s\n", initialIndent, from.IPBlock.CIDR)
+					w.Write(LEVEL_2, "%sExcept: %v\n", initialIndent, strings.Join(from.IPBlock.Except, ", "))
 				}
 			}
 		}
@@ -3318,15 +3330,18 @@ func printNetworkPolicySpecEgressTo(npers []networking.NetworkPolicyEgressRule, 
 			w.Write(LEVEL_0, "%s%s\n", initialIndent, "To: <any> (traffic not restricted by source)")
 		} else {
 			for _, to := range nper.To {
-				w.Write(LEVEL_0, "%s", initialIndent)
-				if to.PodSelector != nil {
-					w.Write(LEVEL_0, "%s: %s\n", "To PodSelector", metav1.FormatLabelSelector(to.PodSelector))
+				w.Write(LEVEL_0, "%s%s\n", initialIndent, "To:")
+				if to.PodSelector != nil && to.NamespaceSelector != nil {
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "NamespaceSelector", metav1.FormatLabelSelector(to.NamespaceSelector))
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "PodSelector", metav1.FormatLabelSelector(to.PodSelector))
+				} else if to.PodSelector != nil {
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "PodSelector", metav1.FormatLabelSelector(to.PodSelector))
 				} else if to.NamespaceSelector != nil {
-					w.Write(LEVEL_0, "%s: %s\n", "To NamespaceSelector", metav1.FormatLabelSelector(to.NamespaceSelector))
+					w.Write(LEVEL_1, "%s%s: %s\n", initialIndent, "NamespaceSelector", metav1.FormatLabelSelector(to.NamespaceSelector))
 				} else if to.IPBlock != nil {
-					w.Write(LEVEL_0, "To IPBlock:\n")
-					w.Write(LEVEL_0, "%s%sCIDR: %s\n", initialIndent, initialIndent, to.IPBlock.CIDR)
-					w.Write(LEVEL_0, "%s%sExcept: %v\n", initialIndent, initialIndent, strings.Join(to.IPBlock.Except, ", "))
+					w.Write(LEVEL_1, "%sIPBlock:\n", initialIndent)
+					w.Write(LEVEL_2, "%sCIDR: %s\n", initialIndent, to.IPBlock.CIDR)
+					w.Write(LEVEL_2, "%sExcept: %v\n", initialIndent, strings.Join(to.IPBlock.Except, ", "))
 				}
 			}
 		}
@@ -3475,7 +3490,7 @@ type PodSecurityPolicyDescriber struct {
 }
 
 func (d *PodSecurityPolicyDescriber) Describe(namespace, name string, describerSettings printers.DescriberSettings) (string, error) {
-	psp, err := d.Extensions().PodSecurityPolicies().Get(name, metav1.GetOptions{})
+	psp, err := d.Policy().PodSecurityPolicies().Get(name, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -3483,7 +3498,7 @@ func (d *PodSecurityPolicyDescriber) Describe(namespace, name string, describerS
 	return describePodSecurityPolicy(psp)
 }
 
-func describePodSecurityPolicy(psp *extensions.PodSecurityPolicy) (string, error) {
+func describePodSecurityPolicy(psp *policy.PodSecurityPolicy) (string, error) {
 	return tabbedString(func(out io.Writer) error {
 		w := NewPrefixWriter(out)
 		w.Write(LEVEL_0, "Name:\t%s\n", psp.Name)
@@ -3543,7 +3558,7 @@ func stringOrDefaultValue(s, defaultValue string) string {
 	return defaultValue
 }
 
-func fsTypeToString(volumes []extensions.FSType) string {
+func fsTypeToString(volumes []policy.FSType) string {
 	strVolumes := []string{}
 	for _, v := range volumes {
 		strVolumes = append(strVolumes, string(v))
@@ -3551,7 +3566,7 @@ func fsTypeToString(volumes []extensions.FSType) string {
 	return stringOrNone(strings.Join(strVolumes, ","))
 }
 
-func flexVolumesToString(flexVolumes []extensions.AllowedFlexVolume) string {
+func flexVolumesToString(flexVolumes []policy.AllowedFlexVolume) string {
 	volumes := []string{}
 	for _, flexVolume := range flexVolumes {
 		volumes = append(volumes, "driver="+flexVolume.Driver)
@@ -3559,7 +3574,7 @@ func flexVolumesToString(flexVolumes []extensions.AllowedFlexVolume) string {
 	return stringOrDefaultValue(strings.Join(volumes, ","), "<all>")
 }
 
-func hostPortRangeToString(ranges []extensions.HostPortRange) string {
+func hostPortRangeToString(ranges []policy.HostPortRange) string {
 	formattedString := ""
 	if ranges != nil {
 		strRanges := []string{}
@@ -3571,7 +3586,7 @@ func hostPortRangeToString(ranges []extensions.HostPortRange) string {
 	return stringOrNone(formattedString)
 }
 
-func userIDRangeToString(ranges []extensions.UserIDRange) string {
+func userIDRangeToString(ranges []policy.UserIDRange) string {
 	formattedString := ""
 	if ranges != nil {
 		strRanges := []string{}
@@ -3583,7 +3598,7 @@ func userIDRangeToString(ranges []extensions.UserIDRange) string {
 	return stringOrNone(formattedString)
 }
 
-func groupIDRangeToString(ranges []extensions.GroupIDRange) string {
+func groupIDRangeToString(ranges []policy.GroupIDRange) string {
 	formattedString := ""
 	if ranges != nil {
 		strRanges := []string{}
@@ -3950,14 +3965,6 @@ func (list SortableVolumeDevices) Swap(i, j int) {
 
 func (list SortableVolumeDevices) Less(i, j int) bool {
 	return list[i].DevicePath < list[j].DevicePath
-}
-
-// TODO: get rid of this and plumb the caller correctly
-func versionedExtensionsClientV1beta1(internalClient clientset.Interface) clientextensionsv1beta1.ExtensionsV1beta1Interface {
-	if internalClient == nil {
-		return &clientextensionsv1beta1.ExtensionsV1beta1Client{}
-	}
-	return clientextensionsv1beta1.New(internalClient.Extensions().RESTClient())
 }
 
 var maxAnnotationLen = 200
