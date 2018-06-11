@@ -16,16 +16,6 @@ rules:
       - watch
   - apiGroups: [""]
     resources:
-      - endpoints
-    verbs:
-      - get
-  - apiGroups: [""]
-    resources:
-      - services
-    verbs:
-      - get
-  - apiGroups: [""]
-    resources:
       - pods/status
     verbs:
       - update
@@ -36,6 +26,17 @@ rules:
       - get
       - list
       - watch
+      - patch
+  - apiGroups: [""]
+    resources:
+      - services
+    verbs:
+      - get
+  - apiGroups: [""]
+    resources:
+      - endpoints
+    verbs:
+      - get
   - apiGroups: [""]
     resources:
       - nodes
@@ -61,7 +62,9 @@ rules:
     resources:
       - globalfelixconfigs
       - felixconfigurations
+      - bgppeers
       - globalbgpconfigs
+      - bgpconfigurations
       - ippools
       - globalnetworkpolicies
       - globalnetworksets
@@ -73,6 +76,4 @@ rules:
       - get
       - list
       - update
-      - patch
-      - delete
       - watch
