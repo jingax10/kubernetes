@@ -2463,6 +2463,8 @@ EOF
     setup-addon-manifests "addons" "gce-extras"
   fi
 
+  setup-addon-manifests "addons" "networkd"
+
   # Place addon manager pod manifest.
   cp "${src_dir}/kube-addon-manager.yaml" /etc/kubernetes/manifests
 }
@@ -2516,6 +2518,46 @@ function setup-kubelet-dir {
     echo "Making /var/lib/kubelet executable for kubelet"
     mount -B /var/lib/kubelet /var/lib/kubelet/
     mount -B -o remount,exec,suid,dev /var/lib/kubelet
+}
+
+# Config policy routing.
+#
+# Specifically, with PTP CNI plugin, for traffic not incoming from the network
+# interface that the default route points to, it is always sent to such a
+# network interface.
+function config-policy-routing {
+  # Do not apply policy routing if kubenet is used.
+  if [[ "${NETWORK_PROVIDER:-}" == "kubenet" ]]; then
+    return
+  fi
+  echo "Configuring policy routing"
+  if [[ "${NETWORK_POLICY_PROVIDER:-}" != "calico" ]]; then
+    sysctl net.ipv4.conf.all.rp_filter=2
+  fi
+  sysctl net.ipv4.conf.eth0.accept_local=1
+  local -r tables="/etc/iproute2/rt_tables"
+  local reserved_tables="$(grep -v ^# ${tables} | awk '{print $1}')"
+  local nic0="$(ip route get 8.8.8.8 | sed -n 's/.*dev \([^\ ]*\) .*/\1/p')"
+  local gateway="$(ip route get 8.8.8.8 | sed -n 's/.*via \([^\ ]*\) .*/\1/p')"
+  local -r pr_table_name="${POLICY_ROUTING_TABLE}"
+  local pr_table
+  local host_ip="$(ip addr show ${nic0} | grep "inet\b" | awk '{print $2}' | cut -d/ -f1)"
+  for table in {1..252}; do
+    if [[ ! "${reserved_tables[@]}" =~ table ]]; then
+      pr_table="${table}"
+      break
+    fi
+  done
+
+  if [[ "${pr_table}" ]]; then
+    echo "${pr_table} ${pr_table_name}" | sudo tee -a "${tables}" > /dev/null
+    ip route add default via "${gateway}" table "${pr_table_name}" 
+    ip rule add not iif "${nic0}" table "${pr_table_name}"
+    ip rule add iif lo table main
+    ip rule add fwmark 0x4000/0x4000 table main
+  fi
+
+  iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark
 }
 
 function reset-motd {
@@ -2684,6 +2726,11 @@ function main() {
       start-node-problem-detector
     fi
   fi
+
+  if [[ "${ENABLE_POLICY_ROUTING:-}" == "true" ]]; then
+    config-policy-routing
+  fi
+
   reset-motd
   prepare-mounter-rootfs
   modprobe configs

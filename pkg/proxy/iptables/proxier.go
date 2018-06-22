@@ -727,6 +727,10 @@ func (proxier *Proxier) syncProxyRules() {
 		"-j", "MARK", "--set-xmark", proxier.masqueradeMark,
 	}...)
 
+	writeLine(proxier.natRules, []string{
+		"-A", string(KubeMarkMasqChain),
+		"-j", "CONNMARK", "--save-mark"}...)
+
 	// Accumulate NAT chains to keep.
 	activeNATChains := map[utiliptables.Chain]bool{} // use a map as a set
 
