@@ -28,12 +28,67 @@ spec:
       # Minimize downtime during a rolling upgrade or deletion; tell Kubernetes to do a "force
       # deletion": https://kubernetes.io/docs/concepts/workloads/pods/pod/#termination-of-pods.
       terminationGracePeriodSeconds: 0
+      initContainers:
+        - image: gcr.io/gke-directpath-staging/netd-amd64:latest
+          name: install-cni-template
+          command: ["sh", "/install-cni.sh"]
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: CALICO_CNI_SPEC_TEMPLATE_FILE
+              value: /usr/share/calico/cni/10-calico.conflist.template
+            - name: ENABLE_CALICO_NETWORK_POLICY
+              value: "true"
+            - name: ENABLE_PRIVATE_IPV6_ACCESS
+              value: "true"
+            - name: CALICO_CNI_SPEC_TEMPLATE
+              value: |-
+                {
+                  "name": "gke-pod-network",
+                  "cniVersion": "0.3.0",
+                  "plugins": [
+                    {
+                      "type": "calico",
+                      "mtu": 1460,
+                      "log_level": "debug",
+                      "datastore_type": "kubernetes",
+                      "nodename": "__KUBERNETES_NODE_NAME__",
+                      "ipam": {
+                        "type": "host-local",
+                        "ranges": [
+                          [ { "subnet": "usePodCidr" } ]@ipv6SubnetOptional
+                        ],
+                        "routes": [
+                          {"dst": "0.0.0.0/0"}@ipv6RouteOptional
+                        ]
+                      },
+                      "policy": {
+                        "type": "k8s",
+                        "k8s_auth_token": "__SERVICEACCOUNT_TOKEN__"
+                      },
+                      "kubernetes": {
+                        "k8s_api_root": "https://__KUBERNETES_SERVICE_HOST__:__KUBERNETES_SERVICE_PORT__",
+                        "kubeconfig": "__KUBECONFIG_FILEPATH__"
+                      }
+                    },
+                    {
+                      "type": "portmap",
+                      "capabilities": {"portMappings": true},
+                      "snat": true
+                    }
+                  ]
+                }
+          volumeMounts:
+            - mountPath: /usr/share/calico/cni
+              name: shared-data
       containers:
         # Runs calico/node container on each Kubernetes node.  This
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: gcr.io/projectcalico-org/node:v2.6.7
+          image: gcr.io/projectcalico-org/node:v3.2.3
           env:
             - name: CALICO_DISABLE_FILE_LOGGING
               value: "true"
@@ -45,6 +100,10 @@ spec:
               value: "ACCEPT"
             - name: FELIX_HEALTHENABLED
               value: "true"
+            - name: FELIX_IGNORELOOSERPF
+              value: "true"
+            - name: FELIX_IPTABLESMANGLEALLOWACTION
+              value: "RETURN"
             - name: FELIX_IPV6SUPPORT
               value: "false"
             - name: FELIX_LOGSEVERITYSYS
@@ -73,13 +132,15 @@ spec:
             httpGet:
               path: /liveness
               port: 9099
+              host: localhost
             periodSeconds: 10
             initialDelaySeconds: 10
             failureThreshold: 6
           readinessProbe:
-            httpGet:
-              path: /readiness
-              port: 9099
+            exec:
+              command:
+              - /bin/calico-node
+              - -felix-ready
             periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
@@ -97,11 +158,11 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: gcr.io/projectcalico-org/cni:v1.11.2
+          image: gcr.io/projectcalico-org/cni:v3.2.3
           command: ["/install-cni.sh"]
           env:
-            - name: CNI_CONF_NAME
-              value: "10-calico.conflist"
+            - name: CNI_NETWORK_CONFIG_FILE
+              value: /usr/share/calico/cni/10-calico.conflist.template
             - name: CNI_NETWORK_CONFIG
               value: |-
                 {
@@ -110,7 +171,7 @@ spec:
                   "plugins": [
                     {
                       "type": "calico",
-                      "log_level": "debug",
+                      "log_level": "info",
                       "datastore_type": "kubernetes",
                       "nodename": "__KUBERNETES_NODE_NAME__",
                       "ipam": {
@@ -133,6 +194,8 @@ spec:
                     }
                   ]
                 }
+            - name: CNI_CONF_NAME
+              value: "10-calico.conflist"
             - name: KUBERNETES_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -142,6 +205,9 @@ spec:
               name: cni-bin-dir
             - mountPath: /host/etc/cni/net.d
               name: cni-net-dir
+            - mountPath: /usr/share/calico/cni
+              name: shared-data
+              readOnly: true
       volumes:
         # Used to ensure proper kmods are installed.
         - name: lib-modules
@@ -165,6 +231,8 @@ spec:
         - name: var-lib-calico
           hostPath:
             path: /var/lib/calico
+        - name: shared-data
+          emptyDir: {}
       tolerations:
         # Make sure calico/node gets scheduled on all nodes.
         - effect: NoSchedule
